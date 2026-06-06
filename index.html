@@ -1048,19 +1048,25 @@ function refreshGPS() {
 // ─── Model Loading ────────────────────────────────────────────────────────────
 async function loadModels() {
   initGeolocation();
-  const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
   const steps = [
     { fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL), label: 'MEMUAT DETEKTOR...', pct: 15 },
     { fn: () => faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL), label: 'MEMUAT LANDMARK...', pct: 30 },
     { fn: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL), label: 'MEMUAT PENGENAL WAJAH...', pct: 45 },
     { fn: () => faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL), label: 'FINALISASI MODEL...', pct: 60 },
   ];
+  let modelsFailed = 0;
   for (const s of steps) {
     document.getElementById('load-msg').textContent = s.label;
     document.getElementById('load-fill').style.width = s.pct + '%';
-    try { await s.fn(); } catch(e) { console.warn('Model load warning:', e); }
+    try { await s.fn(); }
+    catch(e) { console.error('Gagal muat model:', s.label, e); modelsFailed++; }
   }
-  modelsLoaded = true;
+  if (modelsFailed > 0) {
+    document.getElementById('load-msg').textContent = `⚠️ ${modelsFailed} model gagal dimuat. Coba refresh halaman.`;
+    console.error('Beberapa model AI gagal dimuat. Face detection tidak akan berfungsi.');
+  }
+  modelsLoaded = modelsFailed === 0;
 
   document.getElementById('load-msg').textContent = 'MENYINKRONKAN DATABASE...';
   document.getElementById('load-fill').style.width = '75%';
@@ -1670,7 +1676,7 @@ function startRegPreview() {
     if (!modelsLoaded || !vid.videoWidth) return;
     canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
     try {
-      const det = await faceapi.detectSingleFace(vid, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })).withFaceLandmarks(true);
+      const det = await faceapi.detectSingleFace(vid, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })).withFaceLandmarks(true);
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (det) {
@@ -1713,13 +1719,14 @@ function checkDeadlineStatus() {
 async function runDetection() {
   const vid = document.getElementById('video');
   const canvas = document.getElementById('overlay');
-  if (!vid.videoWidth) return;
-  canvas.width = vid.videoWidth; canvas.height = vid.videoHeight;
+  if (!vid.videoWidth || vid.readyState < 2) return;
+  const displaySize = { width: vid.videoWidth, height: vid.videoHeight };
+  faceapi.matchDimensions(canvas, displaySize);
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   try {
-    const det = await faceapi.detectSingleFace(vid, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor();
-    if (!det) { setStatus('warn', 'Wajah tidak terdeteksi...'); return; }
+    const det = await faceapi.detectSingleFace(vid, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.3 })).withFaceLandmarks(true).withFaceDescriptor();
+    if (!det) { setStatus('warn', 'Wajah tidak terdeteksi... (Pastikan cahaya cukup & wajah menghadap kamera)'); return; }
     ctx.strokeStyle = '#2DD4E8'; ctx.lineWidth = 2;
     ctx.strokeRect(det.detection.box.x, det.detection.box.y, det.detection.box.width, det.detection.box.height);
     if (faceDb.length === 0) { setStatus('warn', 'Database kosong. Daftarkan wajah terlebih dahulu!'); return; }
@@ -1803,7 +1810,10 @@ async function runDetection() {
       showUnknown();
       setStatus('err', 'Wajah tidak dikenali dalam database.');
     }
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error('Detection error:', e);
+    setStatus('err', 'Error deteksi: ' + e.message + ' — coba refresh halaman.');
+  }
 }
 
 async function recordAttendance(person, confidence) {
@@ -1923,6 +1933,15 @@ function showLateNotif(name, status) {
   document.getElementById('notif-status').textContent = `TERLAMBAT - Melewati batas waktu`;
   document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Status: ' + status;
   setTimeout(() => { n.classList.remove('show'); }, 5000);
+}
+
+function showUnknown() {
+  const n = document.getElementById('notif');
+  n.className = 'notif show unknown';
+  document.getElementById('notif-name').textContent = 'WAJAH TIDAK DIKENALI';
+  document.getElementById('notif-status').textContent = 'Belum terdaftar dalam database';
+  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Daftarkan diri via tab DAFTAR';
+  setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
 function showDuplicateNotif(name, isOutsideZone = false) {
