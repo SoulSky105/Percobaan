@@ -579,6 +579,21 @@
 .notif.absent { background: linear-gradient(135deg, #F87171 0%, #DC2626 100%); border-left: 6px solid #B91C1C; }
 .notif.absent #notif-name, .notif.absent #notif-status, .notif.absent #notif-time { color: #7F1D1D; font-weight: 700; }
 
+/* Toggle Tombol Absen Datang/Pulang */
+.scan-type-toggle { display: flex; gap: 8px; margin: 12px 16px 0; }
+.type-btn { flex: 1; padding: 10px 0; background: transparent; border: 1px solid var(--border2); color: var(--text2); font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; border-radius: var(--radius); cursor: pointer; transition: all .2s; }
+.type-btn.active { background: rgba(45,212,232,0.15); border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px rgba(45,212,232,0.2); }
+.type-btn.active.pulang { background: rgba(245,196,81,0.15); border-color: var(--amber); color: var(--amber); box-shadow: 0 0 10px rgba(245,196,81,0.2); }
+
+/* Warna Pill untuk Type dan Status Pulang */
+.pill.type.datang { background: rgba(45,212,232,.12); color: var(--accent); border: 1px solid rgba(45,212,232,.25); }
+.pill.type.pulang { background: rgba(245,196,81,.12); color: var(--amber); border: 1px solid rgba(245,196,81,.25); }
+.pill.pulang { background: rgba(245,196,81,.12); color: var(--amber); border: 1px solid rgba(245,196,81,.25); }
+
+/* Popup Notifikasi Pulang */
+.notif.pulang { background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%); border-left: 6px solid #D97706; }
+.notif.pulang #notif-name, .notif.pulang #notif-status, .notif.pulang #notif-time { color: #78350F; font-weight: 700; }
+
 </style>
 </head>
 <body>
@@ -628,6 +643,10 @@
         <div class="notif-status" id="notif-status">—</div>
         <div class="notif-time" id="notif-time">—</div>
       </div>
+            <div class="scan-type-toggle">
+              <button class="type-btn active" id="btn-type-datang" onclick="setScanType('DATANG')">🟢 ABSEN DATANG</button>
+              <button class="type-btn pulang" id="btn-type-pulang" onclick="setScanType('PULANG')">🟠 ABSEN PULANG</button>
+            </div>
       <button class="btn-primary" id="btn-scan" onclick="toggleScan()" disabled>MULAI SCAN</button>
       <div style="height:12px;"></div>
     </div>
@@ -748,7 +767,7 @@
       <div class="stats">
         <div class="stat-card"><div class="stat-label">HADIR HARI INI</div><div class="stat-val green" id="stat-hadir">0</div></div>
         <div class="stat-card"><div class="stat-label">TERDAFTAR</div><div class="stat-val amber" id="stat-total">0</div></div>
-        <div class="stat-card"><div class="stat-label">TOTAL ABSENSI</div><div class="stat-val" id="stat-scan">0</div></div>
+        <div class="stat-card"><div class="stat-label">SUDAH PULANG</div><div class="stat-val amber" id="stat-scan">0</div></div>
       </div>
       <div class="log-card">
         <div class="log-head">
@@ -761,7 +780,7 @@
         <div class="log-table-wrap">
           <table>
             <thead>
-              <tr><th>WAKTU</th><th>NAMA</th><th>DEVISI</th><th>STATUS</th><th>CONFIDENCE</th><th>LOKASI</th></tr>
+              <tr><th>WAKTU</th><th>NAMA</th><th>DEVISI</th><th>TYPE</th><th>STATUS</th><th>CONFIDENCE</th><th>LOKASI</th></tr>
             </thead>
             <tbody id="log-body">
               <tr><td colspan="6"><div class="empty-state"><div class="icon">⬡</div>Belum ada absensi. Mulai scan wajah untuk mencatat kehadiran.</div></td></tr>
@@ -858,6 +877,19 @@ let detectionInterval = null;
 let scanCooldown = false;
 let regPreviewInterval = null;
 
+let currentScanType = 'DATANG';
+
+function setScanType(type) {
+  currentScanType = type;
+  document.getElementById('btn-type-datang').classList.toggle('active', type === 'DATANG');
+  document.getElementById('btn-type-pulang').classList.toggle('active', type === 'PULANG');
+  
+  if (type === 'PULANG') {
+    setStatus('warn', 'Mode ABSEN PULANG aktif. Hadapkan wajah ke kamera.');
+  } else {
+    setStatus('ok', 'Mode ABSEN DATANG aktif. Hadapkan wajah ke kamera.');
+  }
+}
 let currentPos = null;
 let gpsWatchId = null;
 let geofence = { centerLat: null, centerLng: null, radiusM: 100, deadline: '14:00' };
@@ -1722,13 +1754,13 @@ async function runDetection() {
 
             // === CEK LOGIKA ANTI-SPAM & UPDATE STATUS ===
             const today = getLocalDate();
-            const existingLog = attendanceLog.find(log => log.id === bestMatch.id && log.date === today);
+            const existingLog = attendanceLog.find(log => log.id === bestMatch.id && log.date === today && log.type === currentScanType);
 
-            if (existingLog) {
-              // 1. Jika sudah HADIR atau TERLAMBAT, status sudah final. Jangan proses lagi.
-              if (existingLog.status === 'HADIR' || existingLog.status === 'TERLAMBAT') {
-                return; 
-              }
+              if (existingLog) {
+                // Jika status sudah final (HADIR, TERLAMBAT, atau PULANG), tolak scan ulang
+                if (existingLog.status === 'HADIR' || existingLog.status === 'TERLAMBAT' || existingLog.status === 'PULANG') {
+                  return; 
+                }
 
               // 2. Jika sebelumnya TIDAK HADIR, cek apakah sekarang masih di luar zona?
               let isInsideNow = true;
@@ -1778,97 +1810,77 @@ async function recordAttendance(person, confidence) {
 
   const now = new Date();
   const todayStr = getLocalDate(now);
-
   let lat = null, lng = null, accuracy = null, distance = null, mapsLink = '';
 
   if (currentPos) {
-    lat = currentPos.lat;
-    lng = currentPos.lng;
-    accuracy = currentPos.accuracy;
+    lat = currentPos.lat; lng = currentPos.lng; accuracy = currentPos.accuracy;
     mapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
     if (geofence.centerLat !== null && !isNaN(geofence.centerLat)) {
       distance = Math.round(distanceMeters(lat, lng, geofence.centerLat, geofence.centerLng));
     }
   }
 
-  // 🔥 LOGIKA STATUS DI FRONTEND (PASTI BEKERJA)
-  let finalStatus = 'HADIR'; // Default
-
-  // 1. Cek apakah di dalam zona?
   let isInsideZone = true;
   if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && distance !== null) {
     isInsideZone = distance <= geofence.radiusM;
   }
 
-  // 2. Jika DI LUAR ZONA → TIDAK HADIR (prioritas tertinggi)
-  if (!isInsideZone) {
-    finalStatus = 'TIDAK HADIR';
-  } 
-  // 3. Jika DI DALAM ZONA, cek deadline
-  else if (geofence.deadline) {
-    const [h, m] = geofence.deadline.split(':').map(Number);
-    const deadlineMinutes = h * 60 + m;
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    
-    if (currentMinutes > deadlineMinutes) {
-      finalStatus = 'TERLAMBAT';
+  // 🔥 LOGIKA STATUS BERDASARKAN TYPE (DATANG/PULANG)
+  let finalStatus;
+  if (currentScanType === 'PULANG') {
+    finalStatus = isInsideZone ? 'PULANG' : 'TIDAK HADIR'; // Absen pulang tidak cek deadline
+  } else {
+    if (!isInsideZone) finalStatus = 'TIDAK HADIR';
+    else if (geofence.deadline) {
+      const [h, m] = geofence.deadline.split(':').map(Number);
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      finalStatus = currentMinutes > (h * 60 + m) ? 'TERLAMBAT' : 'HADIR';
     } else {
       finalStatus = 'HADIR';
     }
   }
 
-  console.log(`📍 Jarak: ${distance}m | Dalam Zona: ${isInsideZone} | Deadline: ${geofence.deadline} | Status: ${finalStatus}`);
-
-  // Siapkan data untuk dikirim ke server
   const entry = {
-    name: person.name, 
-    id: person.id, 
-    role: person.role,
-    date: todayStr,
-    time: formatTime(now),
-    ts: Date.now(), 
-    lat: lat,         
-    lng: lng,         
-    accuracy: accuracy, 
-    distance: distance, 
-    mapsLink: mapsLink,
-    confidence: confidence, 
-    type: 'DATANG',
-    status: finalStatus  // 🔥 KIRIM STATUS YANG SUDAH DIHITUNG
+    name: person.name, id: person.id, role: person.role, date: todayStr, time: formatTime(now),
+    ts: Date.now(), lat: lat, lng: lng, accuracy: accuracy, distance: distance, mapsLink: mapsLink,
+    confidence: confidence, type: currentScanType, status: finalStatus // 🔥 KIRIM TYPE
   };
 
-  // Tambahkan ke log lokal dulu dengan status sementara
   attendanceLog.unshift({ ...entry, status: '...' });
   localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
-  renderLog();
-  updateStats();
+  renderLog(); updateStats();
 
-  // 🔥 Kirim ke server
   const serverResponse = await sendToSheets(entry);
   
-  // Update log lokal dengan status final
-  const existingIndex = attendanceLog.findIndex(log => log.id === person.id && log.date === todayStr);
-  if (existingIndex !== -1) {
-    attendanceLog[existingIndex] = { ...entry, status: finalStatus };
-  }
+  // Update log lokal
+  const existingIndex = attendanceLog.findIndex(log => log.id === person.id && log.date === todayStr && log.type === currentScanType);
+  if (existingIndex !== -1) attendanceLog[existingIndex] = { ...entry, status: finalStatus };
   
   attendanceLog.sort((a, b) => b.ts - a.ts);
   localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
-  renderLog();
-  updateStats();
+  renderLog(); updateStats();
 
-  // Tampilkan popup berdasarkan status
+  // Tampilkan popup
   if (serverResponse && serverResponse.action === 'spam_ignored') {
     showSpamNotif(person.name);
-  } else if (finalStatus === 'TERLAMBAT') {
-    showLateNotif(person.name, finalStatus);
-  } else if (finalStatus === 'TIDAK HADIR') {
-    showNotif(person.name, finalStatus, confidence, now);
+  } else if (currentScanType === 'PULANG') {
+    if (finalStatus === 'PULANG') showPulangNotif(person.name);
+    else showNotif(person.name, finalStatus, confidence, now);
   } else {
-    showNotif(person.name, finalStatus, confidence, now);
+    if (finalStatus === 'TERLAMBAT') showLateNotif(person.name, finalStatus);
+    else showNotif(person.name, finalStatus, confidence, now);
   }
   
   setTimeout(() => refreshAttendance(), 1500);
+}
+
+function showPulangNotif(name) {
+  const n = document.getElementById('notif');
+  n.className = 'notif show pulang';
+  document.getElementById('notif-name').textContent = name;
+  document.getElementById('notif-status').textContent = `ABSEN PULANG - Sampai jumpa!`;
+  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Status: PULANG';
+  setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
 function showNotif(name, status, confidence, time) {
@@ -2028,18 +2040,24 @@ function renderLog() {
   const todayLog = attendanceLog.filter(e => e.date === today);
   document.getElementById('log-badge').textContent = todayLog.length + ' ENTRI';
   if (todayLog.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="icon">⬡</div>Belum ada absensi hari ini.</div></td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="icon">⬡</div>Belum ada absensi hari ini.</div></td></tr>';
     return;
   }
   tbody.innerHTML = todayLog.map(e => {
-    const pillClass = e.status === 'HADIR' ? 'hadir' : (e.status === 'TERLAMBAT' ? 'terlambat' : 'tidak-hadir');
+    const typePill = e.type === 'PULANG' ? 'pulang' : 'datang';
+    const pillClass = e.status === 'HADIR' ? 'hadir' : 
+                      e.status === 'TERLAMBAT' ? 'terlambat' : 
+                      e.status === 'PULANG' ? 'pulang' : 'tidak-hadir';
+    
     const locCell = e.mapsLink
-      ? `<a href="${e.mapsLink}" target="_blank" rel="noopener noreferrer" class="loc-link">📍 Maps${e.distance !== null && e.distance !== undefined ? ` (${e.distance}m)` : ''}</a>`
+      ? `<a href="${e.mapsLink}" target="_blank" class="loc-link">📍 Maps${e.distance ? ` (${e.distance}m)` : ''}</a>`
       : '<span class="loc-none">—</span>';
+      
     return `<tr>
       <td style="font-family:'Space Mono',monospace;font-size:12px;">${e.time}</td>
       <td class="name-cell">${e.name}</td>
       <td style="color:var(--text3);">${e.role || '—'}</td>
+      <td><span class="pill type ${typePill}">${e.type || 'DATANG'}</span></td>
       <td><span class="pill ${pillClass}">${e.status}</span></td>
       <td style="font-family:'Space Mono',monospace;font-size:12px;color:var(--text3);">${e.confidence}%</td>
       <td>${locCell}</td>
@@ -2050,10 +2068,15 @@ function renderLog() {
 function updateStats() {
   const today = getLocalDate();
   const todayLog = attendanceLog.filter(e => e.date === today);
-  const hadirUniq = new Set(todayLog.filter(e => e.status === 'HADIR').map(e => e.id));
-  document.getElementById('stat-hadir').textContent = hadirUniq.size;
+  
+  // Hitung yang sudah datang (status HADIR/TERLAMBAT)
+  const datangUniq = new Set(todayLog.filter(e => e.type === 'DATANG' && (e.status === 'HADIR' || e.status === 'TERLAMBAT')).map(e => e.id));
+  // Hitung yang sudah pulang (status PULANG)
+  const pulangUniq = new Set(todayLog.filter(e => e.type === 'PULANG' && e.status === 'PULANG').map(e => e.id));
+  
+  document.getElementById('stat-hadir').textContent = datangUniq.size;
   document.getElementById('stat-total').textContent = faceDb.length;
-  document.getElementById('stat-scan').textContent = todayLog.length;
+  document.getElementById('stat-scan').textContent = pulangUniq.size; // Card "SUDAH PULANG"
 }
 
 function showToast(msg, type) {
