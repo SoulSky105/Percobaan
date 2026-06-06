@@ -1720,29 +1720,35 @@ async function runDetection() {
         }
       }
 
-      // === CEK LOGIKA ANTI-SPAM & UPDATE STATUS ===
-      const today = getLocalDate();
-      const existingLog = attendanceLog.find(log => log.id === bestMatch.id && log.date === today);
+            // === CEK LOGIKA ANTI-SPAM & UPDATE STATUS ===
+            const today = getLocalDate();
+            const existingLog = attendanceLog.find(log => log.id === bestMatch.id && log.date === today);
 
-      if (existingLog) {
-        // Kasus 1: Sudah HADIR -> TOLAK (status final)
-        if (existingLog.status === 'HADIR') {
-          showDuplicateNotif(bestMatch.name, false);
-          setStatus('warn', `⚠️ ${bestMatch.name} sudah absen (HADIR) hari ini.`);
-          scanCooldown = true; setTimeout(() => { scanCooldown = false; }, 5000);
-          return;
-        }
+            if (existingLog) {
+              // 1. Jika sudah HADIR atau TERLAMBAT, status sudah final. Jangan proses lagi.
+              if (existingLog.status === 'HADIR' || existingLog.status === 'TERLAMBAT') {
+                return; 
+              }
 
-        // Kasus 2: Sebelumnya TIDAK HADIR, sekarang tetap TIDAK HADIR -> TOLAK
-        if (existingLog.status === 'TIDAK HADIR' && newStatus === 'TIDAK HADIR') {
-          showDuplicateNotif(bestMatch.name, true);
-          setStatus('warn', `⚠️ ${bestMatch.name} sudah tercatat (Di Luar Area / Deadline).`);
-          scanCooldown = true; setTimeout(() => { scanCooldown = false; }, 5000);
-          return;
-        }
+              // 2. Jika sebelumnya TIDAK HADIR, cek apakah sekarang masih di luar zona?
+              let isInsideNow = true;
+              if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && zoneDist !== null) {
+                isInsideNow = zoneDist <= geofence.radiusM;
+              }
+              
+              // Jika masih di luar zona, status tidak berubah. Tampilkan duplikat dan stop.
+              if (existingLog.status === 'TIDAK HADIR' && !isInsideNow) {
+                showDuplicateNotif(bestMatch.name, true);
+                setStatus('warn', `⚠️ ${bestMatch.name} masih di luar area.`);
+                scanCooldown = true; setTimeout(() => { scanCooldown = false; }, 5000);
+                return;
+              }
+              
+              // 3. Jika lolos (misal: dari TIDAK HADIR sekarang masuk zona), izinkan recordAttendance berjalan.
+            }
 
         // Kasus 3: TIDAK HADIR -> HADIR -> IZINKAN (update di recordAttendance)
-      }
+      
 
       // Jika lolos pengecekan, lanjutkan proses absen/update
       ctx.fillStyle = 'rgba(45,212,232,0.12)';
@@ -1750,7 +1756,7 @@ async function runDetection() {
       ctx.fillStyle = '#2DD4E8'; ctx.font = 'bold 13px Space Mono, monospace';
       ctx.fillText(bestMatch.name, det.detection.box.x, det.detection.box.y - 8);
       
-      recordAttendance(bestMatch, confidence, newStatus);
+      recordAttendance(bestMatch, confidence);
       const zoneInfo = zoneDist !== null
         ? (newStatus === 'HADIR' ? ` · ✓ dalam zona (${zoneDist}m)` : ` · ✕ luar zona (${zoneDist}m)`)
         : '';
@@ -1765,7 +1771,7 @@ async function runDetection() {
   } catch(e) { console.error(e); }
 }
 
-async function recordAttendance(person, confidence, newStatus) {
+async function recordAttendance(person, confidence) {
   scanCooldown = true;
   setTimeout(() => { scanCooldown = false; }, 5000);
   await refreshGPS();
@@ -1774,7 +1780,6 @@ async function recordAttendance(person, confidence, newStatus) {
   const todayStr = getLocalDate(now);
 
   let lat = null, lng = null, accuracy = null, distance = null, mapsLink = '';
-  let status = newStatus || 'TIDAK HADIR';
 
   if (currentPos) {
     lat = currentPos.lat;
@@ -1786,7 +1791,35 @@ async function recordAttendance(person, confidence, newStatus) {
     }
   }
 
-  // ✅ PERBAIKAN 1: Gunakan variabel lat, lng, accuracy (bukan currentLat, dll)
+  // 🔥 LOGIKA STATUS DI FRONTEND (PASTI BEKERJA)
+  let finalStatus = 'HADIR'; // Default
+
+  // 1. Cek apakah di dalam zona?
+  let isInsideZone = true;
+  if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && distance !== null) {
+    isInsideZone = distance <= geofence.radiusM;
+  }
+
+  // 2. Jika DI LUAR ZONA → TIDAK HADIR (prioritas tertinggi)
+  if (!isInsideZone) {
+    finalStatus = 'TIDAK HADIR';
+  } 
+  // 3. Jika DI DALAM ZONA, cek deadline
+  else if (geofence.deadline) {
+    const [h, m] = geofence.deadline.split(':').map(Number);
+    const deadlineMinutes = h * 60 + m;
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    if (currentMinutes > deadlineMinutes) {
+      finalStatus = 'TERLAMBAT';
+    } else {
+      finalStatus = 'HADIR';
+    }
+  }
+
+  console.log(`📍 Jarak: ${distance}m | Dalam Zona: ${isInsideZone} | Deadline: ${geofence.deadline} | Status: ${finalStatus}`);
+
+  // Siapkan data untuk dikirim ke server
   const entry = {
     name: person.name, 
     id: person.id, 
@@ -1794,47 +1827,37 @@ async function recordAttendance(person, confidence, newStatus) {
     date: todayStr,
     time: formatTime(now),
     ts: Date.now(), 
-    lat: lat,         // <-- DIPERBAIKI
-    lng: lng,         // <-- DIPERBAIKI
-    accuracy: accuracy, // <-- DIPERBAIKI
+    lat: lat,         
+    lng: lng,         
+    accuracy: accuracy, 
     distance: distance, 
     mapsLink: mapsLink,
     confidence: confidence, 
-    type: 'DATANG'
+    type: 'DATANG',
+    status: finalStatus  // 🔥 KIRIM STATUS YANG SUDAH DIHITUNG
   };
 
-  // Tambahkan ke log lokal dulu dengan status sementara (...)
+  // Tambahkan ke log lokal dulu dengan status sementara
   attendanceLog.unshift({ ...entry, status: '...' });
   localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
   renderLog();
   updateStats();
 
-  // 🔥 Kirim ke server dan tunggu respons
+  // 🔥 Kirim ke server
   const serverResponse = await sendToSheets(entry);
   
-  // Tentukan status final dari server
-  let finalStatus = status;
-  if (serverResponse && serverResponse.newStatus) {
-    finalStatus = serverResponse.newStatus;
-  }
-
-  // === LOGIKA UPDATE LOKAL ===
+  // Update log lokal dengan status final
   const existingIndex = attendanceLog.findIndex(log => log.id === person.id && log.date === todayStr);
-  
   if (existingIndex !== -1) {
     attendanceLog[existingIndex] = { ...entry, status: finalStatus };
-  } else {
-    attendanceLog.unshift({ ...entry, status: finalStatus });
   }
   
-  // Sort agar yang terbaru selalu di atas
   attendanceLog.sort((a, b) => b.ts - a.ts);
   localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
-  
   renderLog();
   updateStats();
 
-  // Tangani respons dari server untuk menampilkan popup
+  // Tampilkan popup berdasarkan status
   if (serverResponse && serverResponse.action === 'spam_ignored') {
     showSpamNotif(person.name);
   } else if (finalStatus === 'TERLAMBAT') {
@@ -1846,7 +1869,7 @@ async function recordAttendance(person, confidence, newStatus) {
   }
   
   setTimeout(() => refreshAttendance(), 1500);
-} // <-- Fungsi ditutup dengan benar di sini
+}
 
 function showNotif(name, status, confidence, time) {
   const n = document.getElementById('notif');
@@ -2009,7 +2032,7 @@ function renderLog() {
     return;
   }
   tbody.innerHTML = todayLog.map(e => {
-    const pillClass = e.status === 'HADIR' ? 'hadir' : 'tidak-hadir';
+    const pillClass = e.status === 'HADIR' ? 'hadir' : (e.status === 'TERLAMBAT' ? 'terlambat' : 'tidak-hadir');
     const locCell = e.mapsLink
       ? `<a href="${e.mapsLink}" target="_blank" rel="noopener noreferrer" class="loc-link">📍 Maps${e.distance !== null && e.distance !== undefined ? ` (${e.distance}m)` : ''}</a>`
       : '<span class="loc-none">—</span>';
