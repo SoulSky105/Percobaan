@@ -1049,24 +1049,24 @@ function refreshGPS() {
 async function loadModels() {
   initGeolocation();
   const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+  // 3 model wajib — faceExpressionNet tidak dipakai, dihapus agar loading lebih cepat
   const steps = [
-    { fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL), label: 'MEMUAT DETEKTOR...', pct: 15 },
-    { fn: () => faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL), label: 'MEMUAT LANDMARK...', pct: 30 },
-    { fn: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL), label: 'MEMUAT PENGENAL WAJAH...', pct: 45 },
-    { fn: () => faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL), label: 'FINALISASI MODEL...', pct: 60 },
+    { fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL), label: 'MEMUAT DETEKTOR...', pct: 25, required: true },
+    { fn: () => faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL), label: 'MEMUAT LANDMARK...', pct: 50, required: true },
+    { fn: () => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL), label: 'MEMUAT PENGENAL WAJAH...', pct: 70, required: true },
   ];
-  let modelsFailed = 0;
+  let criticalFailed = 0;
   for (const s of steps) {
     document.getElementById('load-msg').textContent = s.label;
     document.getElementById('load-fill').style.width = s.pct + '%';
-    try { await s.fn(); }
-    catch(e) { console.error('Gagal muat model:', s.label, e); modelsFailed++; }
+    try { await s.fn(); console.log('✓ Model OK:', s.label); }
+    catch(e) { console.error('Gagal muat model:', s.label, e); if (s.required) criticalFailed++; }
   }
-  if (modelsFailed > 0) {
-    document.getElementById('load-msg').textContent = `⚠️ ${modelsFailed} model gagal dimuat. Coba refresh halaman.`;
-    console.error('Beberapa model AI gagal dimuat. Face detection tidak akan berfungsi.');
+  modelsLoaded = criticalFailed === 0;
+  if (!modelsLoaded) {
+    document.getElementById('load-msg').textContent = '⚠️ Model AI gagal dimuat. Refresh halaman & cek koneksi internet.';
+    console.error('Model kritis gagal dimuat. Face detection tidak berfungsi.');
   }
-  modelsLoaded = modelsFailed === 0;
 
   document.getElementById('load-msg').textContent = 'MENYINKRONKAN DATABASE...';
   document.getElementById('load-fill').style.width = '75%';
@@ -1693,7 +1693,11 @@ function startRegPreview() {
 // ─── Scan ────────────────────────────────────────────────────────────────────
 function toggleScan() { if (!isScanning) startScan(); else stopScan(); }
 function startScan() {
-  if (!modelsLoaded) return;
+  if (!modelsLoaded) {
+    setStatus('err', 'Model AI belum siap. Tunggu loading selesai atau refresh halaman.');
+    showToast('Model AI belum siap. Cek koneksi internet & refresh.', 'error');
+    return;
+  }
   isScanning = true;
   document.getElementById('btn-scan').textContent = 'HENTIKAN SCAN';
   document.getElementById('scan-line').classList.add('running');
