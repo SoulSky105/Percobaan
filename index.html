@@ -992,7 +992,7 @@ function tryWatchPosition(highAccuracy) {
         updateGpsBar(false, 'GPS tidak tersedia — tekan ↻ untuk coba lagi');
       }
     },
-    { enableHighAccuracy: highAccuracy, maximumAge: highAccuracy ? 5000 : 30000, timeout: highAccuracy ? 12000 : 20000 }
+    { enableHighAccuracy: highAccuracy, maximumAge: highAccuracy ? 3000 : 30000, timeout: highAccuracy ? 25000 : 30000 }
   );
 }
 
@@ -1016,14 +1016,19 @@ function updateDistanceDisplay() {
     const dist = Math.round(distanceMeters(currentPos.lat, currentPos.lng, geofence.centerLat, geofence.centerLng));
     const inside = dist <= geofence.radiusM;
     const distTxt = dist < 1000 ? `${dist}m` : `${(dist / 1000).toFixed(1)}km`;
-    const accuracyTooLow = currentPos.accuracy > geofence.radiusM;
-    const label = inside
-      ? `✓ Dalam zona (${dist}m)`
-      : `${distTxt} dari zona`;
-    const suffix = accuracyTooLow
-      ? ` ⚠ akurasi GPS ±${currentPos.accuracy}m > radius ${geofence.radiusM}m`
-      : '';
-    updateGpsBar(accuracyTooLow ? null : inside, `±${currentPos.accuracy}m · ${label}${suffix}`);
+    // GPS dianggap tidak reliabel jika akurasi 3x lebih buruk dari radius
+    const gpsUnreliable = currentPos.accuracy > geofence.radiusM * 3;
+    const accuracyWarn = currentPos.accuracy > geofence.radiusM;
+    if (gpsUnreliable) {
+      // Akurasi sangat buruk — kemungkinan posisi dari WiFi/IP, tidak bisa dipercaya
+      updateGpsBar(null, `±${currentPos.accuracy}m · GPS tidak akurat (WiFi/IP) — absensi tetap bisa dilakukan`);
+    } else if (accuracyWarn) {
+      const label = inside ? `✓ Dalam zona` : `${distTxt} dari zona`;
+      updateGpsBar(inside ? true : null, `±${currentPos.accuracy}m · ${label} ⚠ akurasi rendah`);
+    } else {
+      const label = inside ? `✓ Dalam zona (${dist}m)` : `${distTxt} dari zona`;
+      updateGpsBar(inside, `±${currentPos.accuracy}m · ${label}`);
+    }
   } else {
     updateGpsBar(true, `±${currentPos.accuracy}m`);
   }
@@ -1040,7 +1045,7 @@ function refreshGPS() {
         resolve();
       },
       () => resolve(),
-      { enableHighAccuracy: true, maximumAge: 8000, timeout: 4000 }
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
     );
   });
 }
@@ -1838,8 +1843,16 @@ async function recordAttendance(person, confidence) {
   }
 
   let isInsideZone = true;
+  let gpsSkipped = false;
   if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && distance !== null) {
-    isInsideZone = distance <= geofence.radiusM;
+    // Jika akurasi GPS jauh lebih buruk dari radius (3x), posisi kemungkinan dari WiFi/IP
+    // dan tidak bisa dipercaya — cek zona dilewati agar volunteer tidak salah ditandai TIDAK HADIR
+    if (accuracy !== null && accuracy > geofence.radiusM * 3) {
+      isInsideZone = true;
+      gpsSkipped = true;
+    } else {
+      isInsideZone = distance <= geofence.radiusM;
+    }
   }
 
   // 🔥 LOGIKA STATUS BERDASARKAN TYPE (DATANG/PULANG)
