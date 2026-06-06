@@ -1655,15 +1655,37 @@ document.addEventListener('click', (e) => {
 // ─── Camera ──────────────────────────────────────────────────────────────────
 async function initCameras() {
   try {
-    streamScan = await navigator.mediaDevices.getUserMedia({ video: { width: 308, height: 231, facingMode: 'user' } });
-    document.getElementById('video').srcObject = streamScan;
-    streamReg = await navigator.mediaDevices.getUserMedia({ video: { width: 280, height: 210, facingMode: 'user' } });
-    document.getElementById('video-reg').srcObject = streamReg;
+    // Satu stream dibagi ke dua video — cegah konflik kamera di Android/mobile
+    // Constraints pakai 'ideal' agar fleksibel di semua device
+    streamScan = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+    streamReg = streamScan; // share stream yang sama
+
+    const vidScan = document.getElementById('video');
+    const vidReg  = document.getElementById('video-reg');
+    vidScan.srcObject = streamScan;
+    vidReg.srcObject  = streamScan;
+
+    // Force play — wajib di beberapa mobile browser agar tidak stuck hitam
+    await Promise.all([
+      vidScan.play().catch(() => {}),
+      vidReg.play().catch(() => {})
+    ]);
+
+    // Tunggu video benar-benar streaming sebelum enable tombol scan
+    await new Promise(resolve => {
+      if (vidScan.readyState >= 2) { resolve(); return; }
+      vidScan.addEventListener('loadeddata', resolve, { once: true });
+      setTimeout(resolve, 5000); // fallback: max 5 detik
+    });
+
     setStatus('ok', 'Kamera siap. Tekan MULAI SCAN.');
     document.getElementById('btn-scan').disabled = false;
     startRegPreview();
   } catch (e) {
-    setStatus('err', 'Akses kamera ditolak: ' + e.message);
+    setStatus('err', 'Kamera gagal: ' + e.message);
+    console.error('Camera init error:', e.name, e.message);
   }
 }
 
