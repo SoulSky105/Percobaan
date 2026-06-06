@@ -1048,7 +1048,7 @@ function refreshGPS() {
 // ─── Model Loading ────────────────────────────────────────────────────────────
 async function loadModels() {
   initGeolocation();
-  const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
+  const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
   // 3 model wajib — faceExpressionNet tidak dipakai, dihapus agar loading lebih cepat
   const steps = [
     { fn: () => faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL), label: 'MEMUAT DETEKTOR...', pct: 25, required: true },
