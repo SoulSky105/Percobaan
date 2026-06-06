@@ -567,6 +567,18 @@
   color: #047857;
 }
 
+.notif.spam { background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%); border-left: 6px solid #D97706; }
+.notif.spam #notif-name, .notif.spam #notif-status, .notif.spam #notif-time { color: #78350F; }
+
+.notif.late { background: linear-gradient(135deg, #FB923C 0%, #EA580C 100%); border-left: 6px solid #C2410C; }
+.notif.late #notif-name, .notif.late #notif-status, .notif.late #notif-time { color: #7C2D12; font-weight: 700; }
+
+.notif.present { background: linear-gradient(135deg, #34D399 0%, #059669 100%); border-left: 6px solid #047857; }
+.notif.present #notif-name, .notif.present #notif-status, .notif.present #notif-time { color: #064E3B; font-weight: 700; }
+
+.notif.absent { background: linear-gradient(135deg, #F87171 0%, #DC2626 100%); border-left: 6px solid #B91C1C; }
+.notif.absent #notif-name, .notif.absent #notif-status, .notif.absent #notif-time { color: #7F1D1D; font-weight: 700; }
+
 </style>
 </head>
 <body>
@@ -1126,10 +1138,9 @@ async function sendToSheets(entry) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(getAuthPayload({ action: 'absensi', ...entry }))
     });
-    
-    // Baca respons dari server
     const result = await response.json();
-    return result; // Kembalikan hasil ke pemanggil
+    console.log("Server Response:", result); // 🔥 Debug: Lihat respons di Console browser
+    return result;
   } catch(e) { 
     console.warn('Sheets send error:', e); 
     return null;
@@ -1754,7 +1765,6 @@ async function runDetection() {
   } catch(e) { console.error(e); }
 }
 
-// ─── Attendance ───────────────────────────────────────────────────────────────
 async function recordAttendance(person, confidence, newStatus) {
   scanCooldown = true;
   setTimeout(() => { scanCooldown = false; }, 5000);
@@ -1776,56 +1786,67 @@ async function recordAttendance(person, confidence, newStatus) {
     }
   }
 
+  // ✅ PERBAIKAN 1: Gunakan variabel lat, lng, accuracy (bukan currentLat, dll)
   const entry = {
-    time: formatTime(now),
-    date: todayStr,
-    name: person.name,
-    id: person.id,
+    name: person.name, 
+    id: person.id, 
     role: person.role,
-    status,
-    confidence,
-    ts: now.getTime(),
-    lat, lng, accuracy, distance, mapsLink
+    date: todayStr,
+    time: formatTime(now),
+    ts: Date.now(), 
+    lat: lat,         // <-- DIPERBAIKI
+    lng: lng,         // <-- DIPERBAIKI
+    accuracy: accuracy, // <-- DIPERBAIKI
+    distance: distance, 
+    mapsLink: mapsLink,
+    confidence: confidence, 
+    type: 'DATANG'
   };
+
+  // Tambahkan ke log lokal dulu dengan status sementara (...)
+  attendanceLog.unshift({ ...entry, status: '...' });
+  localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
+  renderLog();
+  updateStats();
+
+  // 🔥 Kirim ke server dan tunggu respons
+  const serverResponse = await sendToSheets(entry);
+  
+  // Tentukan status final dari server
+  let finalStatus = status;
+  if (serverResponse && serverResponse.newStatus) {
+    finalStatus = serverResponse.newStatus;
+  }
 
   // === LOGIKA UPDATE LOKAL ===
   const existingIndex = attendanceLog.findIndex(log => log.id === person.id && log.date === todayStr);
   
   if (existingIndex !== -1) {
-    attendanceLog[existingIndex] = { ...entry };
-    showToast(`✓ Status ${person.name} di-update menjadi ${status}!`, 'success');
+    attendanceLog[existingIndex] = { ...entry, status: finalStatus };
   } else {
-    // Tambah data baru
-    attendanceLog.unshift(entry);
+    attendanceLog.unshift({ ...entry, status: finalStatus });
   }
   
   // Sort agar yang terbaru selalu di atas
   attendanceLog.sort((a, b) => b.ts - a.ts);
-
-    localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
-  
-  // Kirim ke server dan tunggu respons
-  const serverResponse = await sendToSheets(entry);
-  
-  // Tangani respons dari server berdasarkan status
-  if (serverResponse && serverResponse.action === 'spam_ignored') {
-    // Tampilkan pop-up kuning (spam)
-    showSpamNotif(person.name);
-  } else if (serverResponse && serverResponse.newStatus === 'TERLAMBAT') {
-    // Status TERLAMBAT - tampilkan pop-up orange
-    showLateNotif(person.name, serverResponse.newStatus);
-  } else if (serverResponse && (serverResponse.action === 'status_changed' || serverResponse.action === 'added')) {
-    // Status berubah atau data baru - tampilkan pop-up normal
-    showNotif(person.name, serverResponse.newStatus || status, confidence, now);
-  } else {
-    // Fallback: tampilkan notifikasi normal
-    showNotif(person.name, status, confidence, now);
-  }
+  localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
   
   renderLog();
   updateStats();
+
+  // Tangani respons dari server untuk menampilkan popup
+  if (serverResponse && serverResponse.action === 'spam_ignored') {
+    showSpamNotif(person.name);
+  } else if (finalStatus === 'TERLAMBAT') {
+    showLateNotif(person.name, finalStatus);
+  } else if (finalStatus === 'TIDAK HADIR') {
+    showNotif(person.name, finalStatus, confidence, now);
+  } else {
+    showNotif(person.name, finalStatus, confidence, now);
+  }
+  
   setTimeout(() => refreshAttendance(), 1500);
-}
+} // <-- Fungsi ditutup dengan benar di sini
 
 function showNotif(name, status, confidence, time) {
   const n = document.getElementById('notif');
@@ -1850,18 +1871,18 @@ function showNotif(name, status, confidence, time) {
 
 function showSpamNotif(name) {
   const n = document.getElementById('notif');
-  n.className = 'notif show spam'; // Class baru untuk warna kuning
+  n.className = 'notif show spam';
   document.getElementById('notif-name').textContent = name;
   document.getElementById('notif-status').textContent = `${name} sudah terdata`;
-  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Tunggu 1 jam untuk update';
+  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Tunggu 1 jam';
   setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
 function showLateNotif(name, status) {
   const n = document.getElementById('notif');
-  n.className = 'notif show late'; // Class baru untuk warna orange/merah
+  n.className = 'notif show late';
   document.getElementById('notif-name').textContent = name;
-  document.getElementById('notif-status').textContent = `TERLAMBAT - ${name} absen melewati deadline`;
+  document.getElementById('notif-status').textContent = `TERLAMBAT - Melewati batas waktu`;
   document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Status: ' + status;
   setTimeout(() => { n.classList.remove('show'); }, 5000);
 }
