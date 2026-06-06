@@ -495,6 +495,24 @@
 .notif.terlambat { border-color: var(--amber); background: rgba(245,196,81,0.07); }
 .notif.terlambat .notif-name { color: var(--amber); }
 
+.notif.spam {
+  background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%);
+  border-left: 6px solid #D97706;
+}
+
+.notif.spam #notif-name {
+  color: #78350F;
+}
+
+.notif.spam #notif-status {
+  color: #92400E;
+  font-weight: 700;
+}
+
+.notif.spam #notif-time {
+  color: #A16207;
+}
+
 </style>
 </head>
 <body>
@@ -1049,12 +1067,19 @@ async function refreshAttendance() {
 
 async function sendToSheets(entry) {
   try {
-    await fetch(SHEETS_SCRIPT_URL, {
-      method: 'POST', mode: 'no-cors',
+    const response = await fetch(SHEETS_SCRIPT_URL, {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(getAuthPayload({ action: 'absensi', ...entry })) // Pakai helper
+      body: JSON.stringify(getAuthPayload({ action: 'absensi', ...entry }))
     });
-  } catch(e) { console.warn('Sheets send error:', e); }
+    
+    // Baca respons dari server
+    const result = await response.json();
+    return result; // Kembalikan hasil ke pemanggil
+  } catch(e) { 
+    console.warn('Sheets send error:', e); 
+    return null;
+  }
 }
 
 async function sendPersonToSheets(person) {
@@ -1724,11 +1749,27 @@ async function recordAttendance(person, confidence, newStatus) {
   attendanceLog.sort((a, b) => b.ts - a.ts);
 
   localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
-  showNotif(person.name, status, confidence, now);
+  
+  // Kirim ke server dan tunggu respons
+  const serverResponse = await sendToSheets(entry);
+  
+  // Tangani respons dari server
+  if (serverResponse && serverResponse.action === 'spam_ignored') {
+    // Tampilkan pop-up kuning (spam)
+    showSpamNotif(person.name);
+  } else if (serverResponse && serverResponse.action === 'status_changed') {
+    // Status berubah (misal: TIDAK HADIR -> HADIR)
+    showNotif(person.name, serverResponse.newStatus || status, confidence, now);
+  } else if (serverResponse && serverResponse.action === 'added') {
+    // Data baru ditambahkan
+    showNotif(person.name, serverResponse.newStatus || status, confidence, now);
+  } else {
+    // Fallback: tampilkan notifikasi normal
+    showNotif(person.name, status, confidence, now);
+  }
+  
   renderLog();
   updateStats();
-
-  await sendToSheets(entry);
   setTimeout(() => refreshAttendance(), 1500);
 }
 
@@ -1742,6 +1783,15 @@ function showNotif(name, status, conf, time) {
     : `${name} — Di Luar Zona Absensi`;
   document.getElementById('notif-time').textContent = formatTime(time) + ' · Conf: ' + conf + '%';
   setTimeout(() => { n.classList.remove('show'); }, 6000);
+}
+
+function showSpamNotif(name) {
+  const n = document.getElementById('notif');
+  n.className = 'notif show spam'; // Class baru untuk warna kuning
+  document.getElementById('notif-name').textContent = name;
+  document.getElementById('notif-status').textContent = `${name} sudah terdata`;
+  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Tunggu 1 jam untuk update';
+  setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
 function showDuplicateNotif(name, isOutsideZone = false) {
