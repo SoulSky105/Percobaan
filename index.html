@@ -513,6 +513,60 @@
   color: #A16207;
 }
 
+.notif.late {
+  background: linear-gradient(135deg, #FB923C 0%, #EA580C 100%);
+  border-left: 6px solid #C2410C;
+}
+
+.notif.late #notif-name {
+  color: #7C2D12;
+}
+
+.notif.late #notif-status {
+  color: #9A3412;
+  font-weight: 700;
+}
+
+.notif.late #notif-time {
+  color: #C2410C;
+}
+
+.notif.absent {
+  background: linear-gradient(135deg, #F87171 0%, #DC2626 100%);
+  border-left: 6px solid #B91C1C;
+}
+
+.notif.absent #notif-name {
+  color: #7F1D1D;
+}
+
+.notif.absent #notif-status {
+  color: #991B1B;
+  font-weight: 700;
+}
+
+.notif.absent #notif-time {
+  color: #B91C1C;
+}
+
+.notif.present {
+  background: linear-gradient(135deg, #34D399 0%, #059669 100%);
+  border-left: 6px solid #047857;
+}
+
+.notif.present #notif-name {
+  color: #064E3B;
+}
+
+.notif.present #notif-status {
+  color: #065F46;
+  font-weight: 700;
+}
+
+.notif.present #notif-time {
+  color: #047857;
+}
+
 </style>
 </head>
 <body>
@@ -1748,20 +1802,20 @@ async function recordAttendance(person, confidence, newStatus) {
   // Sort agar yang terbaru selalu di atas
   attendanceLog.sort((a, b) => b.ts - a.ts);
 
-  localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
+    localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
   
   // Kirim ke server dan tunggu respons
   const serverResponse = await sendToSheets(entry);
   
-  // Tangani respons dari server
+  // Tangani respons dari server berdasarkan status
   if (serverResponse && serverResponse.action === 'spam_ignored') {
     // Tampilkan pop-up kuning (spam)
     showSpamNotif(person.name);
-  } else if (serverResponse && serverResponse.action === 'status_changed') {
-    // Status berubah (misal: TIDAK HADIR -> HADIR)
-    showNotif(person.name, serverResponse.newStatus || status, confidence, now);
-  } else if (serverResponse && serverResponse.action === 'added') {
-    // Data baru ditambahkan
+  } else if (serverResponse && serverResponse.newStatus === 'TERLAMBAT') {
+    // Status TERLAMBAT - tampilkan pop-up orange
+    showLateNotif(person.name, serverResponse.newStatus);
+  } else if (serverResponse && (serverResponse.action === 'status_changed' || serverResponse.action === 'added')) {
+    // Status berubah atau data baru - tampilkan pop-up normal
     showNotif(person.name, serverResponse.newStatus || status, confidence, now);
   } else {
     // Fallback: tampilkan notifikasi normal
@@ -1773,16 +1827,25 @@ async function recordAttendance(person, confidence, newStatus) {
   setTimeout(() => refreshAttendance(), 1500);
 }
 
-function showNotif(name, status, conf, time) {
-  const isHadir = status === 'HADIR';
+function showNotif(name, status, confidence, time) {
   const n = document.getElementById('notif');
-  n.className = 'notif show ' + (isHadir ? 'hadir' : 'unknown');
+  
+  // Tentukan class berdasarkan status
+  let notifClass = 'notif show';
+  if (status === 'TIDAK HADIR') {
+    notifClass += ' absent'; // Merah
+  } else if (status === 'TERLAMBAT') {
+    notifClass += ' late'; // Orange
+  } else {
+    notifClass += ' present'; // Hijau (default)
+  }
+  
+  n.className = notifClass;
   document.getElementById('notif-name').textContent = name;
-  document.getElementById('notif-status').textContent = isHadir
-    ? `${name} HADIR`
-    : `${name} — Di Luar Zona Absensi`;
-  document.getElementById('notif-time').textContent = formatTime(time) + ' · Conf: ' + conf + '%';
-  setTimeout(() => { n.classList.remove('show'); }, 6000);
+  document.getElementById('notif-status').textContent = status;
+  document.getElementById('notif-time').textContent = formatTime(time) + ' · Confidence: ' + confidence + '%';
+  
+  setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
 function showSpamNotif(name) {
@@ -1792,6 +1855,15 @@ function showSpamNotif(name) {
   document.getElementById('notif-status').textContent = `${name} sudah terdata`;
   document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Tunggu 1 jam untuk update';
   setTimeout(() => { n.classList.remove('show'); }, 4000);
+}
+
+function showLateNotif(name, status) {
+  const n = document.getElementById('notif');
+  n.className = 'notif show late'; // Class baru untuk warna orange/merah
+  document.getElementById('notif-name').textContent = name;
+  document.getElementById('notif-status').textContent = `TERLAMBAT - ${name} absen melewati deadline`;
+  document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Status: ' + status;
+  setTimeout(() => { n.classList.remove('show'); }, 5000);
 }
 
 function showDuplicateNotif(name, isOutsideZone = false) {
