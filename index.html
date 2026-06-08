@@ -594,6 +594,35 @@
 .notif.pulang { background: linear-gradient(135deg, #FCD34D 0%, #F59E0B 100%); border-left: 6px solid #D97706; }
 .notif.pulang #notif-name, .notif.pulang #notif-status, .notif.pulang #notif-time { color: #78350F; font-weight: 700; }
 
+/* ===== ABSENSI MANUAL MODAL ===== */
+.manual-modal { position: fixed; inset: 0; background: rgba(5,11,24,0.92); backdrop-filter: blur(8px); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 16px; }
+.manual-modal.show { display: flex; }
+.manual-modal-inner { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.manual-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.manual-modal-title { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--accent); letter-spacing: 0.08em; }
+.manual-modal-sub { font-size: 11px; color: var(--text3); font-family: var(--mono); margin-top: 3px; }
+.btn-modal-close { background: transparent; border: 1px solid rgba(255,77,106,.3); color: var(--red); font-size: 16px; padding: 3px 9px; border-radius: 8px; cursor: pointer; transition: all .2s; line-height: 1; flex-shrink: 0; }
+.btn-modal-close:hover { background: rgba(255,77,106,.15); }
+.manual-info-bar { padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; font-family: var(--mono); color: var(--text2); line-height: 1.6; }
+.btn-manual-trigger { margin: 6px 16px 0; padding: 9px 0; background: transparent; border: 1px solid var(--border2); color: var(--text2); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; border-radius: var(--radius); cursor: pointer; transition: all .2s; }
+.btn-manual-trigger:hover { border-color: var(--accent); color: var(--accent); background: rgba(45,212,232,0.08); }
+
+/* ===== PHOTO UPLOAD ===== */
+#photo-upload-area:hover { border-color: var(--accent) !important; }
+#photo-upload-area.drag-over { border-color: var(--accent) !important; background: rgba(45,212,232,0.05) !important; }
+
+/* ===== PRINT / PDF ===== */
+@media print {
+  #loading, .sync-badge, .tabs, #btn-admin-toggle,
+  .sidebar, .geofence-panel, .topbar, .stats,
+  .btn-refresh-log, #toast, .log-head-right .badge { display: none !important; }
+  body { background: white !important; color: #1a1a1a !important; }
+  .shell { display: block !important; }
+  .main { padding: 0 !important; }
+  .log-card { border: none !important; box-shadow: none !important; }
+  .log-table-wrap { max-height: none !important; overflow: visible !important; }
+}
+
 </style>
 </head>
 <body>
@@ -648,6 +677,7 @@
               <button class="type-btn pulang" id="btn-type-pulang" onclick="setScanType('PULANG')">🟠 ABSEN PULANG</button>
             </div>
       <button class="btn-primary" id="btn-scan" onclick="toggleScan()" disabled>MULAI SCAN</button>
+      <button class="btn-manual-trigger" onclick="openManualModal()">✍️ ABSEN MANUAL</button>
       <div style="height:12px;"></div>
     </div>
 
@@ -680,9 +710,19 @@
             <div class="capture-indicator" id="cap-indicator">✓ WAJAH TERDETEKSI</div>
           </div>
         </div>
+        <div style="margin:6px 0;text-align:center;"><span style="font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:0.1em;">─── ATAU UPLOAD FOTO ───</span></div>
+        <div>
+          <label style="display:block;font-size:11px;font-family:'Space Mono',monospace;color:var(--text3);letter-spacing:.06em;margin-bottom:6px;">UPLOAD FOTO <span style="color:var(--accent);font-size:9px;">(Opsional — tambah akurasi)</span></label>
+          <div id="photo-upload-area" onclick="document.getElementById('photo-input').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handlePhotoDrop(event)" style="border:2px dashed var(--border2);border-radius:var(--radius);padding:14px;text-align:center;cursor:pointer;transition:border-color .2s;background:var(--surface2);">
+            <input type="file" id="photo-input" accept="image/*" style="display:none" onchange="handlePhotoSelect(this)">
+            <div id="photo-placeholder" style="color:var(--text3);font-size:10px;font-family:'Space Mono',monospace;line-height:1.9;">📂 Klik atau seret foto ke sini<br><span style="font-size:9px;">JPG · PNG · WEBP</span></div>
+            <img id="photo-preview" style="display:none;max-width:100%;max-height:140px;border-radius:8px;object-fit:contain;" alt="">
+          </div>
+          <div id="photo-status" style="display:none;font-size:10px;font-family:'Space Mono',monospace;margin-top:6px;padding:5px 10px;border-radius:6px;"></div>
+        </div>
         <button class="btn-sec" onclick="captureAndRegister()">📸 AMBIL FOTO & DAFTARKAN</button>
         <div style="font-size:11px;color:var(--text3);font-family:'Space Mono',monospace;line-height:1.7;">
-          Pastikan wajah terlihat jelas, pencahayaan cukup, dan hadap ke kamera. Data akan tersinkron ke semua device via Google Sheets.
+          Pastikan wajah terlihat jelas, pencahayaan cukup, dan hadap ke kamera. Upload foto opsional untuk akurasi lebih tinggi. Data tersinkron ke semua device via Google Sheets.
         </div>
       </div>
     </div>
@@ -775,6 +815,7 @@
           <div class="log-head-right">
             <div class="badge" id="log-badge">0 ENTRI</div>
             <button class="btn-refresh-log" onclick="refreshAttendance()">↻ REFRESH</button>
+            <button class="btn-refresh-log" onclick="exportLogPDF()" style="border-color:rgba(245,196,81,.35);color:var(--amber);" title="Export ke PDF">📄 PDF</button>
           </div>
         </div>
         <div class="log-table-wrap">
@@ -861,10 +902,50 @@
   </div>
 </div>
 
+<!-- ===== ABSENSI MANUAL MODAL ===== -->
+<div class="manual-modal" id="manual-modal">
+  <div class="manual-modal-inner">
+    <div class="manual-modal-head">
+      <div>
+        <div class="manual-modal-title">✍️ ABSENSI MANUAL</div>
+        <div class="manual-modal-sub">Alternatif jika kamera atau GPS bermasalah</div>
+      </div>
+      <button class="btn-modal-close" onclick="closeManualModal()">✕</button>
+    </div>
+    <div class="scan-type-toggle" style="margin:0;">
+      <button class="type-btn active" id="manual-btn-datang" onclick="setManualType('DATANG')">🟢 ABSEN DATANG</button>
+      <button class="type-btn pulang" id="manual-btn-pulang" onclick="setManualType('PULANG')">🟠 ABSEN PULANG</button>
+    </div>
+    <div class="field" style="margin:0;">
+      <label>NAMA LENGKAP</label>
+      <input type="text" id="manual-name" list="manual-name-list" placeholder="Ketik atau pilih nama..." oninput="autoFillManualRole(this.value)" autocomplete="off">
+      <datalist id="manual-name-list"></datalist>
+    </div>
+    <div class="field" style="margin:0;">
+      <label>DIVISI</label>
+      <select id="manual-role">
+        <option value="" disabled selected>— Pilih Divisi —</option>
+        <option value="Stage Manager">Stage Manager</option>
+        <option value="Administrasi">Administrasi</option>
+        <option value="Pelayanan Penonton">Pelayanan Penonton</option>
+        <option value="Ticketing">Ticketing</option>
+        <option value="Keamanan">Keamanan</option>
+        <option value="Media">Media</option>
+        <option value="Runner">Runner</option>
+        <option value="Sobat Media Partner">Sobat Media Partner</option>
+        <option value="Liaison Office">Liaison Office</option>
+      </select>
+    </div>
+    <div class="manual-info-bar" id="manual-info-bar">Mengecek GPS...</div>
+    <button class="btn-primary" id="manual-submit-btn" style="margin:0;" onclick="submitManualAttendance()">✓ KIRIM ABSENSI</button>
+    <button class="btn-sec" onclick="closeManualModal()">BATAL</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
-const SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwKBoR0_akWjRNklAVY5zuh_FfZU31DHlwZMhjAv2Qk8-ejH4g_UW7D1AgInmkN87WU2Q/exec';
+const SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyG_bMm5X-SVx64hGTRoInyJQFw1YeJbnotBzt_9ptSWKVRLRDOC_qLilelyOnnGX5Edw/exec';
 const ADMIN_PASS = 'GS26JAYA';
 const API_SECRET = '0345AMGS@^';
 
@@ -876,6 +957,7 @@ let streamScan = null, streamReg = null;
 let detectionInterval = null;
 let scanCooldown = false;
 let regPreviewInterval = null;
+let uploadedPhotoDescriptor = null;
 
 let currentScanType = 'DATANG';
 
@@ -1769,16 +1851,19 @@ async function runDetection() {
       return;
     }
 
-    let bestMatch = null, bestDist = Infinity;
+    let bestMatch = null, bestDist = Infinity, secondBestDist = Infinity;
     for (const person of faceDb) {
       if (!person.descriptors || !person.descriptors.length) continue;
+      let personBestDist = Infinity;
       for (const desc of person.descriptors) {
         const dist = faceapi.euclideanDistance(det.descriptor, new Float32Array(desc));
-        if (dist < bestDist) { bestDist = dist; bestMatch = person; }
+        if (dist < personBestDist) personBestDist = dist;
       }
+      if (personBestDist < bestDist) { secondBestDist = bestDist; bestDist = personBestDist; bestMatch = person; }
+      else if (personBestDist < secondBestDist) { secondBestDist = personBestDist; }
     }
 
-            if (bestDist < 0.52) {
+            if (bestDist < 0.46 && (secondBestDist === Infinity || (secondBestDist - bestDist) >= 0.08)) {
       const confidence = Math.round((1 - bestDist) * 100);
       
       // === HITUNG STATUS BARU SEBELUM MENYIMPAN ===
@@ -1800,7 +1885,14 @@ async function runDetection() {
               if (existingLog) {
                 // Jika status sudah final (HADIR, TERLAMBAT, atau PULANG), tolak scan ulang
                 if (existingLog.status === 'HADIR' || existingLog.status === 'TERLAMBAT' || existingLog.status === 'PULANG') {
-                  return; 
+                  let alreadyInsideZone = null;
+                  if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && zoneDist !== null) {
+                    alreadyInsideZone = zoneDist <= geofence.radiusM;
+                  }
+                  showAlreadyAbsenNotif(bestMatch.name, alreadyInsideZone);
+                  setStatus('warn', `⚠️ ${bestMatch.name} sudah absen hari ini.`);
+                  scanCooldown = true; setTimeout(() => { scanCooldown = false; }, 5000);
+                  return;
                 }
 
               // 2. Jika sebelumnya TIDAK HADIR, cek apakah sekarang masih di luar zona?
@@ -1808,15 +1900,15 @@ async function runDetection() {
               if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && zoneDist !== null) {
                 isInsideNow = zoneDist <= geofence.radiusM;
               }
-              
+
               // Jika masih di luar zona, status tidak berubah. Tampilkan duplikat dan stop.
               if (existingLog.status === 'TIDAK HADIR' && !isInsideNow) {
-                showDuplicateNotif(bestMatch.name, true);
+                showAlreadyAbsenNotif(bestMatch.name, false);
                 setStatus('warn', `⚠️ ${bestMatch.name} masih di luar area.`);
                 scanCooldown = true; setTimeout(() => { scanCooldown = false; }, 5000);
                 return;
               }
-              
+
               // 3. Jika lolos (misal: dari TIDAK HADIR sekarang masuk zona), izinkan recordAttendance berjalan.
             }
 
@@ -1951,7 +2043,8 @@ function showNotif(name, status, confidence, time) {
   n.className = notifClass;
   document.getElementById('notif-name').textContent = name;
   document.getElementById('notif-status').textContent = status;
-  document.getElementById('notif-time').textContent = formatTime(time) + ' · Confidence: ' + confidence + '%';
+  const confText = confidence === 'MANUAL' ? 'Input Manual' : `Confidence: ${confidence}%`;
+  document.getElementById('notif-time').textContent = formatTime(time) + ' · ' + confText;
   
   setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
@@ -1987,7 +2080,7 @@ function showDuplicateNotif(name, isOutsideZone = false) {
   const n = document.getElementById('notif');
   n.className = 'notif show duplicate';
   document.getElementById('notif-name').textContent = name;
-  
+
   if (isOutsideZone) {
     document.getElementById('notif-status').textContent = 'SUDAH ABSEN (DI LUAR AREA)';
     document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Masuk ke zona untuk update status';
@@ -1995,7 +2088,26 @@ function showDuplicateNotif(name, isOutsideZone = false) {
     document.getElementById('notif-status').textContent = 'SUDAH ABSEN HARI INI';
     document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Data tercatat di sistem';
   }
-  
+
+  setTimeout(() => { n.classList.remove('show'); }, 4000);
+}
+
+function showAlreadyAbsenNotif(name, insideZone = null) {
+  const n = document.getElementById('notif');
+  n.className = 'notif show duplicate';
+  document.getElementById('notif-name').textContent = name;
+
+  if (insideZone === null) {
+    document.getElementById('notif-status').textContent = `${name} sudah absen`;
+    document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Data tercatat di sistem';
+  } else if (insideZone) {
+    document.getElementById('notif-status').textContent = `${name} sudah absen di dalam zona`;
+    document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Data tercatat di sistem';
+  } else {
+    document.getElementById('notif-status').textContent = `${name} sudah absen tetapi berada di luar zona`;
+    document.getElementById('notif-time').textContent = formatTime(new Date()) + ' · Masuk ke zona untuk update status';
+  }
+
   setTimeout(() => { n.classList.remove('show'); }, 4000);
 }
 
@@ -2017,19 +2129,23 @@ async function captureAndRegister() {
     return;
   }
   
-  showToast('Mengambil descriptor wajah...', '');
-  
+  showToast('Mengambil sampel wajah dari kamera...', '');
+
   try {
     const samples = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const det = await faceapi.detectSingleFace(vid, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor();
       if (det) samples.push(Array.from(det.descriptor));
       await new Promise(r => setTimeout(r, 400));
     }
-    
-    if (samples.length === 0) { 
-      showToast('Wajah tidak terdeteksi! Pastikan pencahayaan cukup.', 'error'); 
-      return; 
+
+    if (uploadedPhotoDescriptor) {
+      samples.push(uploadedPhotoDescriptor);
+    }
+
+    if (samples.length === 0) {
+      showToast('Wajah tidak terdeteksi! Hadapkan wajah ke kamera atau upload foto.', 'error');
+      return;
     }
     
     const id = 'USR-' + Date.now();
@@ -2054,6 +2170,7 @@ async function captureAndRegister() {
     // Reset form
     document.getElementById('reg-name').value = '';
     document.getElementById('reg-role').selectedIndex = 0;
+    clearPhotoUpload();
     
     setTimeout(() => refreshFromSheets(), 1500);
   } catch(e) { 
@@ -2120,7 +2237,7 @@ function renderLog() {
       <td style="color:var(--text3);">${e.role || '—'}</td>
       <td><span class="pill type ${typePill}">${e.type || 'DATANG'}</span></td>
       <td><span class="pill ${pillClass}">${e.status}</span></td>
-      <td style="font-family:'Space Mono',monospace;font-size:12px;color:var(--text3);">${e.confidence}%</td>
+      <td style="font-family:'Space Mono',monospace;font-size:12px;color:var(--text3);">${e.confidence === 'MANUAL' ? 'MANUAL' : e.confidence + '%'}</td>
       <td>${locCell}</td>
     </tr>`;
   }).join('');
@@ -2163,7 +2280,293 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.getElementById('map-modal').classList.contains('show')) {
     closeMapPicker();
   }
+  if (e.key === 'Escape' && document.getElementById('manual-modal').classList.contains('show')) {
+    closeManualModal();
+  }
 });
+
+// ─── Upload Foto ──────────────────────────────────────────────────────────────
+async function processPhotoFile(file) {
+  const statusEl = document.getElementById('photo-status');
+  const placeholder = document.getElementById('photo-placeholder');
+  const preview = document.getElementById('photo-preview');
+
+  const setStatus = (bg, color, border, text) => {
+    statusEl.style.cssText = `display:block;font-size:10px;font-family:'Space Mono',monospace;margin-top:6px;padding:5px 10px;border-radius:6px;background:${bg};color:${color};border:1px solid ${border};`;
+    statusEl.textContent = text;
+  };
+
+  setStatus('rgba(245,196,81,0.1)', 'var(--amber)', 'rgba(245,196,81,0.3)', '🔍 Memproses foto, harap tunggu...');
+  const imgUrl = URL.createObjectURL(file);
+
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = imgUrl; });
+
+    placeholder.style.display = 'none';
+    preview.src = imgUrl;
+    preview.style.display = 'block';
+
+    const det = await faceapi
+      .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+
+    if (!det) {
+      uploadedPhotoDescriptor = null;
+      setStatus('rgba(255,77,106,0.1)', 'var(--red)', 'rgba(255,77,106,0.3)', '✕ Wajah tidak terdeteksi. Gunakan foto yang lebih jelas & pencahayaan cukup.');
+    } else {
+      uploadedPhotoDescriptor = Array.from(det.descriptor);
+      setStatus('rgba(45,212,232,0.1)', 'var(--accent)', 'rgba(45,212,232,0.3)', '✓ Wajah berhasil terdeteksi dari foto! Siap untuk didaftarkan.');
+    }
+  } catch(e) {
+    uploadedPhotoDescriptor = null;
+    URL.revokeObjectURL(imgUrl);
+    setStatus('rgba(255,77,106,0.1)', 'var(--red)', 'rgba(255,77,106,0.3)', '✕ Gagal memproses foto: ' + e.message);
+  }
+}
+
+function handlePhotoSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!modelsLoaded) { showToast('Model AI belum siap, tunggu sebentar.', 'error'); return; }
+  processPhotoFile(file);
+}
+
+function handlePhotoDrop(event) {
+  event.preventDefault();
+  document.getElementById('photo-upload-area').classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  if (!modelsLoaded) { showToast('Model AI belum siap.', 'error'); return; }
+  processPhotoFile(file);
+}
+
+function clearPhotoUpload() {
+  uploadedPhotoDescriptor = null;
+  const input = document.getElementById('photo-input');
+  if (input) input.value = '';
+  const placeholder = document.getElementById('photo-placeholder');
+  if (placeholder) placeholder.style.display = 'block';
+  const preview = document.getElementById('photo-preview');
+  if (preview) { preview.style.display = 'none'; preview.src = ''; }
+  const statusEl = document.getElementById('photo-status');
+  if (statusEl) statusEl.style.display = 'none';
+}
+
+// ─── Export PDF ───────────────────────────────────────────────────────────────
+function exportLogPDF() {
+  const today = getLocalDate();
+  const todayLog = attendanceLog.filter(e => e.date === today);
+  if (todayLog.length === 0) { showToast('Belum ada data absensi hari ini.', 'error'); return; }
+
+  const hadirSet   = new Set(todayLog.filter(e => e.type === 'DATANG' && (e.status === 'HADIR' || e.status === 'TERLAMBAT')).map(e => e.id));
+  const lambatSet  = new Set(todayLog.filter(e => e.status === 'TERLAMBAT').map(e => e.id));
+  const pulangSet  = new Set(todayLog.filter(e => e.status === 'PULANG').map(e => e.id));
+
+  const colorMap = { 'HADIR':'#059669','TERLAMBAT':'#D97706','PULANG':'#0284c7','TIDAK HADIR':'#DC2626' };
+  const bgMap    = { 'HADIR':'#ECFDF5','TERLAMBAT':'#FFFBEB','PULANG':'#EFF6FF','TIDAK HADIR':'#FEF2F2' };
+
+  const rows = todayLog.map((e, i) => {
+    const c = colorMap[e.status] || '#666';
+    const bg = bgMap[e.status] || '#f9f9f9';
+    const typeBg = e.type === 'PULANG' ? '#FEF3C7' : '#ECFDF5';
+    const typeC  = e.type === 'PULANG' ? '#92400E' : '#065F46';
+    return `<tr>
+      <td style="color:#94a3b8;text-align:center;">${i + 1}</td>
+      <td style="font-family:monospace;">${e.time || '—'}</td>
+      <td><strong>${e.name}</strong></td>
+      <td style="color:#64748b;">${e.role || '—'}</td>
+      <td><span style="background:${typeBg};color:${typeC};padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;">${e.type || 'DATANG'}</span></td>
+      <td><span style="background:${bg};color:${c};padding:2px 9px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid ${c}40;">${e.status}</span></td>
+      <td style="color:#94a3b8;text-align:center;">${e.confidence === 'MANUAL' ? 'Manual' : (e.confidence || '—') + '%'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8">
+<title>Laporan Absensi — ${today}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Arial,sans-serif;color:#1e293b;background:#fff;padding:32px;}
+  .header{margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #0ea5e9;}
+  h1{font-size:20px;color:#0369a1;letter-spacing:0.05em;}
+  .sub{font-size:11px;color:#64748b;margin-top:5px;}
+  .stats{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+  .s{text-align:center;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 18px;min-width:90px;}
+  .sv{font-size:24px;font-weight:700;}
+  .sl{font-size:9px;color:#64748b;margin-top:2px;letter-spacing:0.06em;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  thead th{background:#f1f5f9;padding:9px 12px;text-align:left;font-size:10px;color:#64748b;letter-spacing:0.07em;border-bottom:2px solid #e2e8f0;}
+  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+  tr:hover td{background:#f8fafc;}
+  .footer{margin-top:20px;font-size:10px;color:#94a3b8;text-align:center;border-top:1px solid #f1f5f9;padding-top:12px;}
+  @media print{body{padding:10px;}@page{margin:1cm;size:A4 landscape;}}
+</style></head><body>
+<div class="header">
+  <h1>LAPORAN ABSENSI VOLUNTEER — GREBEG SURO PONOROGO 2026</h1>
+  <div class="sub">Tanggal: <strong>${today}</strong> &nbsp;·&nbsp; Dicetak: ${new Date().toLocaleString('id-ID')} &nbsp;·&nbsp; Total terdaftar: ${faceDb.length} orang</div>
+</div>
+<div class="stats">
+  <div class="s"><div class="sv" style="color:#059669;">${hadirSet.size}</div><div class="sl">HADIR</div></div>
+  <div class="s"><div class="sv" style="color:#D97706;">${lambatSet.size}</div><div class="sl">TERLAMBAT</div></div>
+  <div class="s"><div class="sv" style="color:#0284c7;">${pulangSet.size}</div><div class="sl">SUDAH PULANG</div></div>
+  <div class="s"><div class="sv" style="color:#DC2626;">${Math.max(0, faceDb.length - hadirSet.size)}</div><div class="sl">BELUM HADIR</div></div>
+  <div class="s"><div class="sv">${todayLog.length}</div><div class="sl">TOTAL LOG</div></div>
+</div>
+<table>
+  <thead><tr><th>#</th><th>WAKTU</th><th>NAMA</th><th>DIVISI</th><th>TIPE</th><th>STATUS</th><th>METODE</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="footer">Sistem Absensi Volunteer · Grebeg Suro Ponorogo 2026 · Digenerate otomatis &nbsp;|&nbsp; Simpan sebagai PDF: Ctrl+P → "Save as PDF"</div>
+<script>setTimeout(()=>window.print(),500);<\/script>
+</body></html>`;
+
+  const win = window.open('', '_blank', 'width=1000,height=750');
+  if (!win) { showToast('Pop-up diblokir browser. Izinkan pop-up untuk halaman ini lalu coba lagi.', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+// ─── Absensi Manual ──────────────────────────────────────────────────────────
+let manualScanType = 'DATANG';
+
+function setManualType(type) {
+  manualScanType = type;
+  document.getElementById('manual-btn-datang').classList.toggle('active', type === 'DATANG');
+  document.getElementById('manual-btn-pulang').classList.toggle('active', type === 'PULANG');
+}
+
+function autoFillManualRole(val) {
+  const found = faceDb.find(p => p.name.toLowerCase() === val.trim().toLowerCase());
+  if (found) document.getElementById('manual-role').value = found.role;
+}
+
+function openManualModal() {
+  const datalist = document.getElementById('manual-name-list');
+  datalist.innerHTML = faceDb.map(p => `<option value="${p.name}"></option>`).join('');
+  document.getElementById('manual-name').value = '';
+  document.getElementById('manual-role').selectedIndex = 0;
+  setManualType('DATANG');
+  updateManualInfoBar();
+  document.getElementById('manual-modal').classList.add('show');
+}
+
+function closeManualModal() {
+  document.getElementById('manual-modal').classList.remove('show');
+}
+
+function updateManualInfoBar() {
+  const el = document.getElementById('manual-info-bar');
+  if (!el) return;
+  if (!currentPos) {
+    el.textContent = '⚠️ GPS tidak tersedia — absensi tetap bisa dikirim, status menyesuaikan geofence.';
+    return;
+  }
+  if (geofence.centerLat !== null && !isNaN(geofence.centerLat)) {
+    const dist = Math.round(distanceMeters(currentPos.lat, currentPos.lng, geofence.centerLat, geofence.centerLng));
+    const inside = dist <= geofence.radiusM;
+    const distTxt = dist < 1000 ? dist + 'm' : (dist / 1000).toFixed(1) + 'km';
+    el.textContent = `GPS ±${currentPos.accuracy}m · ${inside ? '✓ Dalam zona' : '✕ Luar zona'} (${distTxt} dari pusat)`;
+  } else {
+    el.textContent = `GPS ±${currentPos.accuracy}m · Geofence belum dikonfigurasi`;
+  }
+}
+
+async function submitManualAttendance() {
+  const nameInput = document.getElementById('manual-name').value.trim();
+  const roleVal = document.getElementById('manual-role').value;
+  if (!nameInput) { showToast('Nama wajib diisi!', 'error'); return; }
+  if (!roleVal) { showToast('Pilih divisi terlebih dahulu!', 'error'); return; }
+
+  const matched = faceDb.find(p => p.name.toLowerCase() === nameInput.toLowerCase());
+  const personId = matched ? matched.id : 'MANUAL-' + Date.now();
+  const personName = matched ? matched.name : nameInput;
+  const personRole = matched ? matched.role : roleVal;
+
+  const today = getLocalDate();
+  const existing = attendanceLog.find(log =>
+    (matched ? log.id === personId : log.name.toLowerCase() === nameInput.toLowerCase()) &&
+    log.date === today && log.type === manualScanType
+  );
+  if (existing && (existing.status === 'HADIR' || existing.status === 'TERLAMBAT' || existing.status === 'PULANG')) {
+    let insideZone = null;
+    if (currentPos && geofence.centerLat !== null && !isNaN(geofence.centerLat)) {
+      const dist = Math.round(distanceMeters(currentPos.lat, currentPos.lng, geofence.centerLat, geofence.centerLng));
+      insideZone = dist <= geofence.radiusM;
+    }
+    closeManualModal();
+    showAlreadyAbsenNotif(personName, insideZone);
+    return;
+  }
+
+  const submitBtn = document.getElementById('manual-submit-btn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Mengirim...';
+
+  try {
+    await refreshGPS();
+    const now = new Date();
+    const todayStr = getLocalDate(now);
+    let lat = null, lng = null, accuracy = null, distance = null, mapsLink = '';
+
+    if (currentPos) {
+      lat = currentPos.lat; lng = currentPos.lng; accuracy = currentPos.accuracy;
+      mapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
+      if (geofence.centerLat !== null && !isNaN(geofence.centerLat)) {
+        distance = Math.round(distanceMeters(lat, lng, geofence.centerLat, geofence.centerLng));
+      }
+    }
+
+    let isInsideZone = true;
+    if (geofence.centerLat !== null && !isNaN(geofence.centerLat) && distance !== null) {
+      const gpsUnreliable = accuracy !== null && accuracy > geofence.radiusM * 3;
+      isInsideZone = gpsUnreliable ? true : distance <= geofence.radiusM;
+    }
+
+    let finalStatus;
+    if (manualScanType === 'PULANG') {
+      finalStatus = isInsideZone ? 'PULANG' : 'TIDAK HADIR';
+    } else {
+      if (!isInsideZone) {
+        finalStatus = 'TIDAK HADIR';
+      } else if (geofence.deadline) {
+        const [h, m] = geofence.deadline.split(':').map(Number);
+        finalStatus = (now.getHours() * 60 + now.getMinutes()) > (h * 60 + m) ? 'TERLAMBAT' : 'HADIR';
+      } else {
+        finalStatus = 'HADIR';
+      }
+    }
+
+    const entry = {
+      name: personName, id: personId, role: personRole,
+      date: todayStr, time: formatTime(now), ts: Date.now(),
+      lat, lng, accuracy, distance, mapsLink,
+      confidence: 'MANUAL', type: manualScanType, status: finalStatus
+    };
+
+    attendanceLog.unshift({ ...entry });
+    localStorage.setItem('attlog', JSON.stringify(attendanceLog.slice(0, 500)));
+    renderLog(); updateStats();
+
+    const serverResponse = await sendToSheets(entry);
+    closeManualModal();
+
+    if (serverResponse && serverResponse.action === 'spam_ignored') {
+      showSpamNotif(personName);
+    } else if (manualScanType === 'PULANG') {
+      finalStatus === 'PULANG' ? showPulangNotif(personName) : showNotif(personName, finalStatus, 'MANUAL', now);
+    } else {
+      finalStatus === 'TERLAMBAT' ? showLateNotif(personName, finalStatus) : showNotif(personName, finalStatus, 'MANUAL', now);
+    }
+
+    setTimeout(() => refreshAttendance(), 1500);
+  } catch(e) {
+    showToast('Gagal mengirim: ' + e.message, 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = '✓ KIRIM ABSENSI';
+  }
+}
 </script>
 </body>
 </html>
