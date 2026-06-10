@@ -216,6 +216,7 @@
     <div class="card">
       <h2>Lokasi GPS</h2>
       <div class="gps-stat" id="gps-stat"><span class="ico">📍</span><span id="gps-text">Mengambil lokasi…</span></div>
+      <div class="hint" id="zone-info" style="margin:0 0 10px"></div>
       <button class="act ghost" style="margin-bottom:12px" onclick="refreshLocation(true)">🛰️ Perbarui Lokasi</button>
       <div id="map-absen"></div>
     </div>
@@ -235,6 +236,7 @@
         <button class="act ghost" style="flex:0 0 auto;min-width:0;padding:11px 14px" onclick="loadLog()">↻</button>
         <button class="act primary" style="flex:0 0 auto;min-width:0;padding:11px 16px" onclick="exportPDF()">⬇️ PDF</button>
       </div>
+      <div class="hint" style="margin-bottom:8px">👆 Ketuk baris untuk lihat foto &amp; verifikasi lokasi di peta.</div>
       <div class="tbl-scroll">
         <table>
           <thead><tr><th></th><th>Nama</th><th>Divisi</th><th>Masuk</th><th>Pulang</th><th>Status</th><th>Zona</th></tr></thead>
@@ -353,6 +355,17 @@
   </div>
 </div>
 
+<!-- ===== Detail relawan (verifikasi lokasi & foto) ===== -->
+<div class="overlay" id="detail-ov">
+  <div class="map-modal" style="max-width:480px">
+    <div class="head">
+      <b id="detail-title">Detail Absensi</b>
+      <button class="act ghost" style="flex:0;min-width:0;padding:6px 12px" onclick="closeDetail()">✕</button>
+    </div>
+    <div id="detail-body" style="padding:14px;max-height:72vh;overflow:auto"></div>
+  </div>
+</div>
+
 <canvas id="canvas" style="display:none"></canvas>
 <div class="toast" id="toast"></div>
 
@@ -376,9 +389,9 @@ const DEFAULT_CFG = {
   resetHour: 3,
   faceThreshold: 0.5,
   divisions: ['Acara','Konsumsi','Logistik','Dokumentasi','Humas & Publikasi','Perlengkapan','Keamanan','Medis','Fundraising','Sekretariat'],
-  backend: 'local',
+  backend: 'sheets',
   supabaseUrl: '', supabaseKey: '',
-  sheetUrl: ''
+  sheetUrl: 'https://script.google.com/macros/s/AKfycbyG_bMm5X-SVx64hGTRoInyJQFw1YeJbnotBzt_9ptSWKVRLRDOC_qLilelyOnnGX5Edw/exec'
 };
 let cfg = loadCfg();
 
@@ -386,7 +399,7 @@ let cfg = loadCfg();
 let mode = 'MASUK';
 let stream = null, modelsReady = false;
 let currentPos = null;           // {lat,lng,accuracy}
-let mapAbsen=null, mapAdmin=null, mapPicker=null;
+let mapAbsen=null, mapAdmin=null, mapPicker=null, mapDetail=null;
 let adminCircle=null, adminMarker=null, pickerMarker=null, pickerCircle=null;
 let absenMarker=null, absenZone=null, absenUserDot=null;
 let pickedLatLng=null;
@@ -395,8 +408,13 @@ let pickedLatLng=null;
    1. UTIL
    ===================================================================== */
 function loadCfg(){
-  try{ return Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem('av_cfg')||'{}')); }
-  catch(e){ return {...DEFAULT_CFG}; }
+  try{
+    const c = Object.assign({}, DEFAULT_CFG, JSON.parse(localStorage.getItem('av_cfg')||'{}'));
+    // Pastikan URL Google Sheets bawaan tetap dipakai walau ada cache lama yang kosong
+    if(!c.sheetUrl && DEFAULT_CFG.sheetUrl) c.sheetUrl = DEFAULT_CFG.sheetUrl;
+    if(c.sheetUrl && c.backend==='local') c.backend = 'sheets';
+    return c;
+  }catch(e){ return {...DEFAULT_CFG}; }
 }
 function saveCfgLocal(){ localStorage.setItem('av_cfg', JSON.stringify(cfg)); }
 
@@ -662,6 +680,25 @@ function drawAbsenMap(){
   setTimeout(()=>mapAbsen.invalidateSize(),100);
 }
 
+// Tampilkan deadline & zona aktif (hasil sinkron dari DB) di tab Absensi
+function renderZoneInfo(){
+  const el=document.getElementById('zone-info'); if(!el) return;
+  const zoneTxt = cfg.zoneLat!=null ? ('radius '+cfg.zoneRadius+' m') : 'belum diatur admin';
+  el.innerHTML = '⏰ Deadline: <b>'+(cfg.deadline||'-')+'</b> &nbsp;·&nbsp; 🎯 Zona: <b>'+zoneTxt+'</b>';
+}
+// Perbarui lingkaran zona di peta absensi tanpa menggeser tampilan peta
+function updateAbsenZone(){
+  if(!mapAbsen) return;
+  if(absenZone){ mapAbsen.removeLayer(absenZone); absenZone=null; }
+  if(cfg.zoneLat!=null){ absenZone=L.circle([cfg.zoneLat,cfg.zoneLng],{radius:cfg.zoneRadius,color:'#2DD4E8',fillColor:'#2DD4E8',fillOpacity:.12,weight:2}).addTo(mapAbsen); }
+}
+// Ambil ulang konfigurasi bersama (zona/deadline/divisi) dari database secara berkala
+async function syncSharedConfig(){
+  if(Net.mode==='local') return;
+  await Net.pullConfig();
+  fillDivisions(); renderZoneInfo(); updateAbsenZone(); renderGpsStatus();
+}
+
 /* =====================================================================
    5. AKSI ABSEN
    ===================================================================== */
@@ -784,7 +821,7 @@ async function loadLog(){
     const pillCls=r.status==='HADIR'?'hadir':r.status==='TERLAMBAT'?'terlambat':'tidak';
     const zona = r.checkInDist==null ? '—' : (r.insideZone?('✓ '+r.checkInDist+'m'):('✕ '+r.checkInDist+'m'));
     const pulangCell = r.checkOutTime ? ('<span class="pill pulang">'+timeStr(r.checkOutTime)+'</span>') : '—';
-    return `<tr>
+    return `<tr onclick="openDetail('${r.id}')" style="cursor:pointer">
       <td>${r.checkInPhoto?`<img class="thumb" src="${r.checkInPhoto}">`:''}</td>
       <td><b>${esc(r.nama)}</b></td>
       <td>${esc(r.divisi||'—')}</td>
@@ -819,6 +856,51 @@ async function exportPDF(){
   doc.save('absensi_'+date+'.pdf');
   toast('PDF diunduh ✓');
 }
+
+/* ---- Detail per relawan: verifikasi apakah benar di dalam zona + foto ---- */
+function openDetail(id){
+  const r=Net._localGet(id);
+  if(!r){ toast('Data tidak ditemukan'); return; }
+  const statusCls=r.status==='HADIR'?'hadir':r.status==='TERLAMBAT'?'terlambat':'tidak';
+  const zonaBadge = r.checkInDist==null ? '<span class="pill">zona belum di-set</span>'
+    : (r.insideZone ? '<span class="pill hadir">✓ DALAM ZONA ('+r.checkInDist+' m)</span>'
+                    : '<span class="pill tidak">✕ LUAR ZONA ('+r.checkInDist+' m)</span>');
+  const gIn  = r.checkInLat!=null  ? 'https://www.google.com/maps?q='+r.checkInLat+','+r.checkInLng   : null;
+  const gOut = r.checkOutLat!=null ? 'https://www.google.com/maps?q='+r.checkOutLat+','+r.checkOutLng : null;
+  document.getElementById('detail-title').textContent = r.nama+' · '+(r.divisi||'-');
+  document.getElementById('detail-body').innerHTML =
+    '<div style="display:flex;gap:10px;margin-bottom:12px">'+
+      '<div style="flex:1;text-align:center"><div class="hint">📥 Foto Masuk</div>'+
+        (r.checkInPhoto?'<img src="'+r.checkInPhoto+'" style="width:100%;border-radius:10px;border:1px solid var(--border)">':'<div class="empty">—</div>')+
+        '<div style="font-family:var(--mono);font-size:12px;margin-top:4px">'+timeStr(r.checkInTime)+'</div></div>'+
+      '<div style="flex:1;text-align:center"><div class="hint">🏁 Foto Pulang</div>'+
+        (r.checkOutPhoto?'<img src="'+r.checkOutPhoto+'" style="width:100%;border-radius:10px;border:1px solid var(--border)">':'<div class="empty">Belum pulang</div>')+
+        '<div style="font-family:var(--mono);font-size:12px;margin-top:4px">'+(r.checkOutTime?timeStr(r.checkOutTime):'—')+'</div></div>'+
+    '</div>'+
+    '<div style="margin-bottom:10px">Status: <span class="pill '+statusCls+'">'+r.status+'</span> &nbsp; '+zonaBadge+'</div>'+
+    '<div class="hint" style="margin-bottom:8px;line-height:1.9">'+
+      '📍 Masuk: '+(r.checkInLat!=null?(r.checkInLat.toFixed(6)+', '+r.checkInLng.toFixed(6)):'—')+(gIn?' · <a href="'+gIn+'" target="_blank" style="color:var(--accent)">buka Google Maps ↗</a>':'')+'<br>'+
+      '🏁 Pulang: '+(r.checkOutLat!=null?(r.checkOutLat.toFixed(6)+', '+r.checkOutLng.toFixed(6)):'—')+(gOut?' · <a href="'+gOut+'" target="_blank" style="color:var(--accent)">buka Google Maps ↗</a>':'')+
+    '</div>'+
+    '<div id="map-detail" style="height:240px;border-radius:12px;border:1px solid var(--border)"></div>';
+  document.getElementById('detail-ov').classList.add('show');
+  setTimeout(()=>renderDetailMap(r),250);
+}
+function renderDetailMap(r){
+  if(!window.L) return;
+  if(mapDetail){ mapDetail.remove(); mapDetail=null; }
+  const el=document.getElementById('map-detail'); if(!el) return;
+  const center=r.checkInLat!=null?[r.checkInLat,r.checkInLng]:(cfg.zoneLat!=null?[cfg.zoneLat,cfg.zoneLng]:[-6.2,106.816666]);
+  mapDetail=L.map(el).setView(center,16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(mapDetail);
+  const layers=[];
+  if(cfg.zoneLat!=null){ const z=L.circle([cfg.zoneLat,cfg.zoneLng],{radius:cfg.zoneRadius,color:'#2DD4E8',fillColor:'#2DD4E8',fillOpacity:.12,weight:2}).addTo(mapDetail); layers.push(z); }
+  if(r.checkInLat!=null){ const mk=L.marker([r.checkInLat,r.checkInLng]).addTo(mapDetail).bindPopup('📥 Lokasi Absen Masuk'); layers.push(mk); }
+  if(r.checkOutLat!=null){ const mk2=L.circleMarker([r.checkOutLat,r.checkOutLng],{radius:8,color:'#fff',weight:2,fillColor:'#A78BFA',fillOpacity:1}).addTo(mapDetail).bindPopup('🏁 Lokasi Absen Pulang'); layers.push(mk2); }
+  try{ mapDetail.fitBounds(L.featureGroup(layers).getBounds().pad(0.5)); }catch(e){}
+  setTimeout(()=>mapDetail.invalidateSize(),120);
+}
+function closeDetail(){ document.getElementById('detail-ov').classList.remove('show'); if(mapDetail){ mapDetail.remove(); mapDetail=null; } }
 
 /* =====================================================================
    7. ADMIN
@@ -936,9 +1018,14 @@ async function saveAdmin(){
   saveCfgLocal();
   fillDivisions();
   Net.init();
-  await Net.pushConfig();        // bagikan zona/deadline/divisi ke semua perangkat (jika online)
+  await Net.pushConfig();        // simpan zona/deadline/divisi ke database → terlihat semua perangkat
   drawAbsenMap();
-  showModal('ok','💾','Tersimpan','Konfigurasi berhasil disimpan'+(Net.mode!=='local'?' & disinkron online.':'.'));
+  renderZoneInfo();
+  const online = Net.mode!=='local';
+  const msg = online
+    ? 'Zona, deadline & divisi tersimpan di database ('+Net.mode+') — otomatis terlihat dari semua perangkat (perlu buka/refresh app di device lain).'
+    : '⚠️ Tersimpan di perangkat INI saja. Agar terlihat dari device lain, pilih Database "Supabase" atau "Google Sheets" di atas, lalu Simpan lagi.';
+  showModal(online?'ok':'info','💾','Tersimpan',msg);
 }
 
 function clearLocalData(){
@@ -1038,6 +1125,7 @@ async function init(){
   setMode('MASUK');
   tickClock(); setInterval(tickClock,1000);
   setInterval(dailyResetTick,30000);
+  setInterval(syncSharedConfig,180000);   // sinkron zona/deadline dari database tiap 3 menit
   checkSecureContext();
 
   Net.init();
@@ -1045,6 +1133,7 @@ async function init(){
   await Net.pullNames();    // ambil daftar nama yang pernah absen → dropdown
   fillDivisions();
   fillNameList();
+  renderZoneInfo();         // tampilkan deadline & zona aktif dari database
 
   const modelsOk = await loadModels();
   document.getElementById('boot').style.display='none';
